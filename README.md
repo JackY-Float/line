@@ -1,4 +1,4 @@
-# line
+# Line
 An adobe effects script to create paths by points/layer bounds/positions
 
 一个快速从图层边界框/图层位置/点控制添加线条的AE脚本
