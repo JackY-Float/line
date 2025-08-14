@@ -46,13 +46,14 @@
 
     function main(flag) {
         var comp = getActiveComp();
+        var layerName = "Lines";
         if (!comp) return;
         try {
             switch (flag) {
                 case "Points":
                 case "Angle":
                     app.beginUndoGroup("Add Path");
-                    addSingle(getShapeLayer(comp, false), flag);
+                    addSingle(getShapeLayerByName(comp, layerName), flag);
                     break;
                 case "Selection":
                     app.beginUndoGroup("Add Paths in Batch");
@@ -60,7 +61,7 @@
                         return property.matchName == "ADBE Point Control";
                     }
                     var pointControls = comp.selectedLayers[0].selectedProperties.filter(isPointControl);
-                    addFromSelection(pointControls, getShapeLayer(comp, true));
+                    addFromSelection(pointControls, getShapeLayerByName(comp, layerName));
                     break;
                 case "Position":
                     app.beginUndoGroup("Add Paths in Batch");
@@ -69,12 +70,12 @@
                     for (var i = 0, len = layers.length; i < len; i++) {
                         positions.push(layers[i].property("Position"));
                     }
-                    addFromPosition(positions, getShapeLayer(comp, true));
+                    addFromPosition(positions, getShapeLayerByName(comp, layerName));
                     break;
                 case "Bound":
                     app.beginUndoGroup("Add Path from Bound");
                     var layers = comp.selectedLayers;
-                    target = getShapeLayer(comp, true);
+                    target = getShapeLayerByName(comp, layerName);
                     for (var i = 0, len = layers.length; i < len; i++) {
                         addFromBound(layers[i], target);
                     }
@@ -92,24 +93,19 @@
             app.executeCommand(16);
             alert(error.toString());
         }
-        return;
     }
 
     function getActiveComp() {
         var comp = app.project.activeItem;
-        if (!comp || !(comp instanceof CompItem)) {
-            throw new Error("请选择一个合成!");
-        }
+        if (!comp || !(comp instanceof CompItem)) throw new Error("请选择一个合成!");
         return comp;
     }
 
-    function getShapeLayer(comp, create) {
-        var selectedLayers = comp.selectedLayers;
-        if (!create && selectedLayers.length == 1 && selectedLayers[0].property("ADBE Root Vectors Group")) {
-            return selectedLayers[0];
-        }
-        var layer = comp.layers.addShape();
-        layer.name = "Lines";
+    function getShapeLayerByName(comp, name) {
+        var layer = comp.layer(name);
+        if (layer) return layer;
+        layer = comp.layers.addShape();
+        layer.name = name;
         // layer.property("Position").setValue([0, 0]);
         layer.property("Anchor Point").setValue([comp.width / 2, comp.height / 2]);
         layer.property("ADBE Root Vectors Group").addProperty("ADBE Vector Graphic - Stroke");
@@ -121,12 +117,15 @@
         return (selectedProperties && selectedProperties.length === 1) ? selectedProperties[0] : null;
     }
 
-    function clearSelection(layer) {
-        var selectedProperties = layer.selectedProperties;
-        for (var i = 0, len = selectedProperties.length; i < len; i++) {
-            selectedProperties[i].selected = false;
+    function clearSelection(comp) {
+        var comp = getActiveComp();
+        function deselect(p) {
+            for (var i = 0, len = p.length; i < len; i++) {
+                p[i].selected = false;
+            }
         }
-        return;
+        deselect(comp.selectedProperties);
+        deselect(comp.selectedLayers);
     }
 
     function uniqueName(property, name) {
@@ -161,9 +160,7 @@
     }
 
     function pair(arr) {
-        if (!arr || arr.length < 2) {
-            throw new Error("请选择至少两个图层或属性!");
-        }
+        if (!arr || arr.length < 2) throw new Error("请选择至少两个图层或属性!");
         var list = [], len = arr.length;
         for (var i = 0; i < len; i++) {
             for (var j = i + 1; j < len; j++) {
@@ -226,7 +223,7 @@
     }
 
     // 绑定表达式
-    function bindControl(path, controlName, type) {
+    function bindControl(path, control, type) {
         var code = "";
         switch (type) {
             case "Angle":
@@ -237,34 +234,32 @@
                 code = "\n    const [x1, y1, x2, y2] = [c(\"Point A\")[0], c(\"Point A\")[1], c(\"Point B\")[0], c(\"Point B\")[1]];\n    dx = x2 - x1, dy = y2 - y1; \n    if (dx == 0 && dy == 0) dx = 1;";
                 break;
         }
-        path.property("ADBE Vector Shape").expression = "function extendLineInRect(c) {\n    const w = width, h = height;" + code + "\n    const t = [];\n    t.push((0 - x1) \/ dx);\n    t.push((w - x1) \/ dx);\n    t.push((0 - y1) \/ dy);\n    t.push((h - y1) \/ dy);\n\n    const points = t.map(k => [x1 + dx * k, y1 + dy * k])\n        .filter(([x, y]) => x >= -1e-6 && x <= w + 1e-6 && y >= -1e-6 && y <= h + 1e-6);\n    while (points.length < 2) points.push([x1, y1], [x2, y2]);\n    return [points[0], points[1]];\n}\ncreatePath(extendLineInRect(effect(\"" + controlName + "\")),inTangents=[],outTangents=[],isClosed=false);";
-        return;
+        path.property("ADBE Vector Shape").expression = "function extendLineInRect(c) {\n    const w = width, h = height;" + code + "\n    const t = [];\n    t.push((0 - x1) \/ dx);\n    t.push((w - x1) \/ dx);\n    t.push((0 - y1) \/ dy);\n    t.push((h - y1) \/ dy);\n\n    const points = t.map(k => [x1 + dx * k, y1 + dy * k])\n        .filter(([x, y]) => x >= -1e-6 && x <= w + 1e-6 && y >= -1e-6 && y <= h + 1e-6);\n    while (points.length < 2) points.push([x1, y1], [x2, y2]);\n    return [points[0], points[1]];\n}\ncreatePath(extendLineInRect(effect(\"" + control.name + "\")),inTangents=[],outTangents=[],isClosed=false);";
     }
 
-    function bindToTarget(control, p1, p2) {
-        function getBindExpression(target) {
-            var layerName = target.propertyGroup(target.propertyDepth).name;
-            switch (target.matchName) {
-                case "ADBE Point Control":
-                    return "thisComp.layer(\"" + layerName + "\").effect(\"" + target.name + "\")(\"ADBE Point Control-0001\")";
-                case "ADBE Position":
-                    return "thisComp.layer(\"" + layerName + "\").transform.position";
-            }
+    function bindToTarget(source, target) {
+        var layerName = target.propertyGroup(target.propertyDepth).name;
+        var expression = "";
+        switch (target.matchName) {
+            case "ADBE Point Control":
+                expression = "thisComp.layer(\"" + layerName + "\").effect(\"" + target.name + "\")(\"ADBE Point Control-0001\")";
+                break;
+            case "ADBE Position":
+                expression = "thisComp.layer(\"" + layerName + "\").transform.position";
+                break;
         }
-        control.property("Point A").expression = getBindExpression(p1);
-        control.property("Point B").expression = getBindExpression(p2);
+        source.expression = expression;
     }
 
     function addPath(layer, lineSet, type) {
         var line = createPathInGroup(lineSet);
-        clearSelection(layer);
+        clearSelection();
+        layer.selected = true;
         layer.applyPreset(getFFX(type));
         var control = getSelectedProperty(layer);
-        if (!control) {
-            throw new Error("应用效果失败!");
-        }
+        if (!control) throw new Error("应用效果失败!");
         control.name = (type == "Set") ? lineSet.name + " " + line.name : line.name;
-        bindControl(line, control.name, type);
+        bindControl(line, control, type);
         control.selected = false;
         return control;
     }
@@ -273,33 +268,32 @@
         var lineSet = getGroup(layer, "Lines");
         addPath(layer, lineSet, type);
         lineSet.moveTo(1);
-        return;
     }
 
     function addFromSelection(pointControls, targetLayer) {
-        var pairList = pair(pointControls);
         var lineSet = getNewGroup(targetLayer, "LineSet");
+        var pairList = pair(pointControls);
         for (var p = 0, len = pairList.length; p < len; p++) {
             var control = addPath(targetLayer, lineSet, "Set");
             var pc1 = pointControls[pairList[p][0]];
             var pc2 = pointControls[pairList[p][1]];
-            bindToTarget(control, pc1, pc2);
+            bindToTarget(control.property("Point A"), pc1);
+            bindToTarget(control.property("Point B"), pc2);
         }
         lineSet.moveTo(1);
-        return;
     }
 
     function addFromPosition(positions, targetLayer) {
-        var pairList = pair(positions);
         var lineSet = getNewGroup(targetLayer, "LineSet");
+        var pairList = pair(positions);
         for (var i = 0, len = pairList.length; i < len; i++) {
             var control = addPath(targetLayer, lineSet, "Set");
             var p1 = positions[pairList[i][0]];
             var p2 = positions[pairList[i][1]];
-            bindToTarget(control, p1, p2);
+            bindToTarget(control.property("Point A"), p1);
+            bindToTarget(control.property("Point B"), p2);
         }
         lineSet.moveTo(1);
-        return;
     }
 
     function addFromBound(layer, targetLayer) {
@@ -336,7 +330,6 @@
             }
         }
         lineSet.moveTo(1);
-        return;
     }
 
     function addRectPointControls(layer) {
@@ -363,7 +356,6 @@
                     pointControl.property("ADBE Point Control-0001").expression = pre + expression["RB"]; break;
             }
         }
-        return;
     }
 
 })(this);
