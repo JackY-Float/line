@@ -1,5 +1,5 @@
 /*
-    Lines v2.0
+    Lines v3.1
     Generate paths from points.
 */
 (function lines(thisObj) {
